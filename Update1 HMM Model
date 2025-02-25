@@ -1,0 +1,169 @@
+import pandas as pd
+import numpy as np
+from hmmlearn import hmm
+import joblib
+import os
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
+class EnhancedHMM:
+    def __init__(self, n_components=4, sequence_length=20, covariance_type='full', 
+                 min_covar=1e-4, n_iter=100):
+        self.n_components = n_components
+        self.sequence_length = sequence_length
+        self.covariance_type = covariance_type
+        self.min_covar = min_covar
+        self.n_iter = n_iter
+        self.models = {}
+        self.scalers = {}
+        
+    def _init_hmm(self):
+        """Initialize HMM with optimal parameters"""
+        return hmm.GaussianHMM(
+            n_components=self.n_components,
+            covariance_type=self.covariance_type,
+            n_iter=self.n_iter,
+            random_state=42,
+            min_covar=self.min_covar,
+            init_params="kmeans"  # Initialize using k-means clustering
+        )
+    
+    def preprocess_data(self, df, is_training=True):
+        """Preprocess data with improved scaling and outlier handling"""
+        num_images = df.shape[0]
+        num_sequences = num_images // self.sequence_length
+        landmark_sequences = {i: [] for i in range(21)}
+        
+        # Extract sequences for each landmark
+        for seq in range(num_sequences):
+            start_idx = seq * self.sequence_length
+            end_idx = start_idx + self.sequence_length
+            for i in range(21):
+                seq_data = [self._parse_landmark(df, row, i) 
+                           for row in range(start_idx, end_idx)]
+                landmark_sequences[i].append(np.array(seq_data))
+        
+        # Apply robust scaling
+        if is_training:
+            self.scalers = {i: RobustScaler() for i in range(21)}
+        
+        scaled_sequences = {}
+        for i in range(21):
+            if is_training:
+                X = np.concatenate(landmark_sequences[i], axis=0)
+                X_scaled = self.scalers[i].fit_transform(X)
+                lengths = [self.sequence_length] * len(landmark_sequences[i])
+                scaled_sequences[i] = (X_scaled, lengths)
+            else:
+                scaled_sequences[i] = [
+                    self.scalers[i].transform(seq) 
+                    for seq in landmark_sequences[i]
+                ]
+        
+        return scaled_sequences
+    
+    def _parse_landmark(self, df, row, i):
+        """Extract landmark coordinates with validation"""
+        coords = [
+            df.iloc[row][f'lm_{i}_x'],
+            df.iloc[row][f'lm_{i}_y'],
+            df.iloc[row][f'lm_{i}_z']
+        ]
+        # Handle potential NaN values
+        return np.nan_to_num(coords, nan=0.0)
+    
+    def train(self, train_df, validation_split=0.2):
+        """Train HMM models with cross-validation"""
+        scaled_sequences = self.preprocess_data(train_df, is_training=True)
+        
+        for i in range(21):
+            X_scaled, lengths = scaled_sequences[i]
+            
+            # Implement k-fold cross-validation
+            kf = KFold(n_splits=5, shuffle=True, random_state=42)
+            best_score = float('-inf')
+            best_model = None
+            
+            for train_idx, val_idx in kf.split(X_scaled):
+                model = self._init_hmm()
+                
+                # Split sequences properly
+                train_len = len(train_idx) // self.sequence_length * self.sequence_length
+                val_len = len(val_idx) // self.sequence_length * self.sequence_length
+                
+                X_train = X_scaled[train_idx[:train_len]]
+                X_val = X_scaled[val_idx[:val_len]]
+                
+                # Train model
+                model.fit(X_train, [self.sequence_length] * (train_len // self.sequence_length))
+                score = model.score(X_val)
+                
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+            
+            self.models[i] = best_model
+            joblib.dump(best_model, f"hmm_landmark_{i}.pkl")
+    
+    def predict_proba(self, test_df):
+        """Compute normalized probabilities with improved handling"""
+        scaled_sequences = self.preprocess_data(test_df, is_training=False)
+        num_sequences = len(scaled_sequences[0])
+        probabilities = []
+        
+        for seq_idx in range(num_sequences):
+            seq_log_probs = []
+            
+            for i in range(21):
+                try:
+                    log_prob = self.models[i].score(scaled_sequences[i][seq_idx])
+                    seq_log_probs.append(log_prob)
+                except Exception as e:
+                    print(f"Error processing landmark {i}, sequence {seq_idx}: {str(e)}")
+                    seq_log_probs.append(float('-inf'))
+            
+            # Improved normalization using log-sum-exp trick
+            max_log_prob = max(seq_log_probs)
+            normalized_probs = [
+                np.exp(lp - max_log_prob) 
+                for lp in seq_log_probs
+            ]
+            sum_probs = sum(normalized_probs)
+            normalized_probs = [p/sum_probs for p in normalized_probs]
+            
+            probabilities.append(normalized_probs)
+        
+        return pd.DataFrame(
+            probabilities, 
+            columns=[f'lm_{i}_prob' for i in range(21)]
+        )
+
+# Usage example
+if __name__ == "__main__":
+    # Configuration
+    train_csv = "adv_seq_data.csv"
+    test_csv = "beg_seq_data.csv"
+    
+    # Initialize and train model
+    hmm_processor = EnhancedHMM(
+        n_components=4,
+        sequence_length=20,
+        covariance_type='full',
+        min_covar=1e-4,
+        n_iter=100
+    )
+    
+    # Load and process data
+    train_df = pd.read_csv(train_csv)
+    test_df = pd.read_csv(test_csv)
+    
+    # Train models
+    hmm_processor.train(train_df)
+    
+    # Generate predictions
+    probabilities = hmm_processor.predict_proba(test_df)
+    probabilities.to_csv("claude_beginner_prob_data.csv", index=False)

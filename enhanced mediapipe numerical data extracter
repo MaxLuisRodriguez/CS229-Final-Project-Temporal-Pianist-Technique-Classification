@@ -1,0 +1,211 @@
+import cv2 
+import numpy as np
+import mediapipe as mp
+import pandas as pd
+from azure.storage.blob import BlobServiceClient
+from scipy.spatial.transform import Rotation
+
+# -------------------------------------------------
+# Azure Blob Storage Settings & Connection
+# -------------------------------------------------
+account_name = 'cvpiano1'
+image_container = 'cs229beginnerimagesequencesbatch1'
+connect_str = (
+    'DefaultEndpointsProtocol=https;AccountName=cvpiano1;'
+    'AccountKey=qVT8KKSkYiKw1xFw/Bbo3mW3V8h0wwKv3JzeyjLHBRAV3vDFz/UaVUsXg4P3b55+mqpn44MoN6Hc+AStAVMZPQ==;'
+    'EndpointSuffix=core.windows.net'
+)
+
+try:
+    blob_service_client = BlobServiceClient.from_connection_string(connect_str)
+    image_container_client = blob_service_client.get_container_client(image_container)
+    print("Connected to Azure Blob Storage container:", image_container)
+except Exception as e:
+    print("Error connecting to Azure Blob Storage:", e)
+    exit()
+
+# -------------------------------------------------
+# Retrieve and sort all image files from the container
+# -------------------------------------------------
+blob_list = [blob.name for blob in image_container_client.list_blobs() 
+             if blob.name.lower().endswith('.jpg')]
+print(f"Found {len(blob_list)} JPEG blobs in container '{image_container}'.")
+blob_list.sort()
+
+# -------------------------------------------------
+# Initialize Mediapipe Hand Detection
+# -------------------------------------------------
+mp_hands = mp.solutions.hands
+
+def create_empty_landmark_dict():
+    """Create an empty landmark dictionary with all values set to NaN"""
+    d = {}
+    for i in range(21):
+        d[f'lm_{i}_x'] = np.nan
+        d[f'lm_{i}_y'] = np.nan
+        d[f'lm_{i}_z'] = np.nan
+    return d
+
+def normalize_hand_orientation(landmarks_dict):
+    """
+    Normalize hand orientation to ensure consistent top-down alignment
+    """
+    try:
+        # Extract key points for orientation
+        wrist = np.array([
+            landmarks_dict['lm_0_x'],
+            landmarks_dict['lm_0_y'],
+            landmarks_dict['lm_0_z']
+        ])
+        middle_mcp = np.array([
+            landmarks_dict['lm_9_x'],
+            landmarks_dict['lm_9_y'],
+            landmarks_dict['lm_9_z']
+        ])
+        
+        # Calculate hand direction vector
+        hand_direction = middle_mcp - wrist
+        
+        # Calculate rotation to align hand direction with y-axis (vertical)
+        target_direction = np.array([0, 1, 0])
+        rotation_axis = np.cross(hand_direction, target_direction)
+        rotation_angle = np.arccos(np.dot(hand_direction, target_direction) / 
+                                 (np.linalg.norm(hand_direction) * np.linalg.norm(target_direction)))
+        
+        # Create rotation matrix
+        rotation = Rotation.from_rotvec(rotation_axis * rotation_angle)
+        
+        # Apply rotation to all landmarks
+        normalized_dict = {}
+        for i in range(21):
+            point = np.array([
+                landmarks_dict[f'lm_{i}_x'],
+                landmarks_dict[f'lm_{i}_y'],
+                landmarks_dict[f'lm_{i}_z']
+            ])
+            rotated_point = rotation.apply(point)
+            
+            normalized_dict[f'lm_{i}_x'] = rotated_point[0]
+            normalized_dict[f'lm_{i}_y'] = rotated_point[1]
+            normalized_dict[f'lm_{i}_z'] = rotated_point[2]
+        
+        return normalized_dict
+    except Exception as e:
+        print(f"Error in orientation normalization: {e}")
+        return landmarks_dict
+
+def process_hand_landmarks(hand_landmarks, is_left_hand):
+    """Process hand landmarks with orientation normalization and left hand mirroring"""
+    # Extract raw landmarks
+    hand_dict = {}
+    for i, lm in enumerate(hand_landmarks.landmark):
+        hand_dict[f'lm_{i}_x'] = lm.x
+        hand_dict[f'lm_{i}_y'] = lm.y
+        hand_dict[f'lm_{i}_z'] = lm.z
+    
+    # Mirror left hand coordinates
+    if is_left_hand:
+        for i in range(21):
+            hand_dict[f'lm_{i}_x'] = 1.0 - hand_dict[f'lm_{i}_x']
+    
+    # Normalize orientation
+    return normalize_hand_orientation(hand_dict)
+
+def has_redundant_rows(df, threshold=5):
+    """Check if a sequence has at least threshold identical rows"""
+    return (df.duplicated().sum() >= threshold)
+
+# Lists to store sequences of hand landmark data (each sequence is 20 frames)
+right_sequences = []
+left_sequences = []
+right_current_seq = []
+left_current_seq = []
+
+with mp_hands.Hands(static_image_mode=True,
+                    max_num_hands=2,
+                    min_detection_confidence=0.5) as hands_detector:
+    
+    for idx, blob_name in enumerate(blob_list):
+        try:
+            # Download and read the image
+            blob_client = image_container_client.get_blob_client(blob_name)
+            image_bytes = blob_client.download_blob().readall()
+            np_arr = np.frombuffer(image_bytes, np.uint8)
+            image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            
+            # Initialize default rows as empty dictionaries (all NaNs)
+            right_row = create_empty_landmark_dict()
+            left_row = create_empty_landmark_dict()
+            
+            # If image is corrupted/unreadable, we leave the row as all NaNs
+            if image is None:
+                print(f"Warning: Unable to decode image {blob_name}. Using NaN for landmarks.")
+            else:
+                # Convert image for MediaPipe processing
+                image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                results = hands_detector.process(image_rgb)
+                
+                if results.multi_hand_landmarks and results.multi_handedness:
+                    for hand_landmarks, hand_handedness in zip(results.multi_hand_landmarks, results.multi_handedness):
+                        hand_label = hand_handedness.classification[0].label.lower()
+                        is_left_hand = (hand_label == "left")
+                        
+                        # Process landmarks with orientation normalization
+                        processed_landmarks = process_hand_landmarks(
+                            hand_landmarks,
+                            is_left_hand
+                        )
+                        
+                        if hand_label == "right":
+                            right_row = processed_landmarks
+                        else:  # left hand
+                            left_row = processed_landmarks
+                            
+            right_current_seq.append(right_row)
+            left_current_seq.append(left_row)
+            
+        except Exception as e:
+            print(f"Error processing {blob_name}: {e}")
+            # In case of error, append empty rows
+            right_current_seq.append(create_empty_landmark_dict())
+            left_current_seq.append(create_empty_landmark_dict())
+
+        # Every 20 frames, process the sequence batch
+        if (idx + 1) % 20 == 0:
+            df_right = pd.DataFrame(right_current_seq)
+            df_left = pd.DataFrame(left_current_seq)
+                
+            # Check whether there is any valid (non-NaN) data in the sequence before interpolation.
+            if df_right.dropna(how='all').empty:
+                print("Skipping right-hand sequence: No valid landmarks detected.")
+            else:
+                df_right.interpolate(method='linear', inplace=True, limit_direction='both')
+
+                # Remove sequences with at least 5 identical rows
+                if not has_redundant_rows(df_right):
+                    right_sequences.append(df_right)
+                else:
+                    print("Skipping right-hand sequence due to excessive duplicate rows.")
+
+            if df_left.dropna(how='all').empty:
+                print("Skipping left-hand sequence: No valid landmarks detected.")
+            else:
+                df_left.interpolate(method='linear', inplace=True, limit_direction='both')
+
+                # Remove sequences with at least 5 identical rows
+                if not has_redundant_rows(df_left):
+                    left_sequences.append(df_left)
+                else:
+                    print("Skipping left-hand sequence due to excessive duplicate rows.")
+                
+            # Reset for next batch of 20 images
+            right_current_seq = []
+            left_current_seq = []
+
+# Combine all sequences and save to CSV files
+if right_sequences or left_sequences:
+    df_final_hand_data = pd.concat(right_sequences + left_sequences, ignore_index=True)
+    df_final_hand_data.to_csv("beg_seq_data.csv", index=False)
+    print("Hand landmark CSV saved as 'beginner.csv'.")
+else:
+    print("No valid hand sequences were processed.")
