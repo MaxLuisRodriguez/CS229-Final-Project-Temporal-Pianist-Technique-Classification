@@ -1,0 +1,2 @@
+# CS229-Final-Project-Temporal-Pianist-Technique-Classification
+Can an AI feedback model be implemented to train aspiring classical musicians to a level of conservatory-level technique? This project explores just that, from advanced data preprocessing methods to testing different state of the art methods of classification. Is it possible to pick out an advanced pianist from image sequences? Surprisingly, yes! 
