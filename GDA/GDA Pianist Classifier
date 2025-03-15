@@ -4,15 +4,13 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 
 
-# It is assumed that the CSV files are formatted such that the last column
-# is the target label 'y' and all preceding columns are the features
+# last column has target label and all preceding columns are the features
 train_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\TrainTest Data\6comp probs\PCA_6comp_train_data.csv"
 test_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout Data\6 State Probs\PCA_6comp_holdout_data.csv"
 
 train_set = pd.read_csv(train_path)
 test_set = pd.read_csv(test_path)
 
-# For both training and test datasets, separate the features (X) from the labels (y)
 # - X_train and X_test: All columns except the last one are used as features
 # - y_train and y_test: The column named "y" is used as the label
 y_label = train_set.columns[-1]
@@ -52,8 +50,8 @@ def compute_gda_params(X, y):
     # Initialize the covariance matrix with zeros.
     sigma = np.zeros((n, n))
     
-    # Accumulate the covariance contributions from each sample.
-    # For each sample, compute the outer product of the difference between the sample and its class mean.
+
+    # compute the outer product of the difference between the sample and its class mean.
     for i in range(m):
         x_i = X[i].reshape(-1, 1)  # Reshape the sample into a column vector for matrix operations.
         # Select the corresponding class mean based on the sample's label.
@@ -88,7 +86,7 @@ def gda_predict(X, phi, mu_0, mu_1, sigma_inv):
     """
     predictions = []  # List to store the computed decision values for each sample.
     
-    # Calculate the logarithm of the prior ratio:
+    # Calculate the logarithm of the prior ratio
     log_prior_ratio = np.log(phi / (1 - phi)) # used because priors are not always equal with current data set
 
     # Process each sample in the input feature matrix
@@ -179,10 +177,9 @@ if X_train.shape[1] - 1 == 2:
     Z = np.array([decision_function(point) for point in grid])
     Z = Z.reshape(xx.shape)
 
-    # Create the plot
+
     plt.figure(figsize=(8, 6))
 
-    # Plot the decision boundary where decision function equals 0
     plt.contour(xx, yy, Z, levels=[0], colors='black', linewidths=2)
 
     # Plot the training data points with different markers and colors for each class
