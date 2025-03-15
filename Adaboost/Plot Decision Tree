@@ -95,7 +95,7 @@ y_train = y
 X_test = df2[feature_columns].values
 y_test = df2[target_column].values
 
-# Define hyperparameter range
+# hyperparameter range
 max_depth_values = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15]
 
 # Store results
@@ -115,10 +115,9 @@ for max_depth in max_depth_values:
     
     results.append([max_depth, train_accuracy, test_accuracy])
 
-# Convert to DataFrame
 results_df = pd.DataFrame(results, columns=['Max Depth', 'Train Accuracy', 'Test Accuracy'])
 
-# Plot results
+# plot results
 plt.figure(figsize=(12, 6))
 plt.plot(results_df['Max Depth'], results_df['Test Accuracy'], marker='o', label='Test Accuracy')
 plt.plot(results_df['Max Depth'], results_df['Train Accuracy'], marker='s', label='Train Accuracy')
