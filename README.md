@@ -2,4 +2,4 @@
 Can an AI feedback model be implemented to train aspiring classical musicians to a level of conservatory-level technique? This project explores just that, from advanced data preprocessing methods to testing different state of the art methods of classification. Is it possible to pick out an advanced pianist from image sequences? Surprisingly, yes! 
 
 # How it works:
-Go to master branch to see all project scripts and data.
+Navigate to master branch to see all project scripts and data.
