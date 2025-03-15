@@ -16,15 +16,14 @@ y_train = train_df.iloc[:, -1].values
 X_holdout = holdout_df.iloc[:, :-1].values
 y_holdout = holdout_df.iloc[:, -1].values
 
-# Initialize and fit LDA on the training data
-# For two classes, n_components will be 1 at most.
+
+# For two classes n_components will be 1
 lda = LDA(n_components=1)
 X_train_lda = lda.fit_transform(X_train, y_train)
 
 # Transform the holdout data using the fitted LDA model
 X_holdout_lda = lda.transform(X_holdout)
 
-# Create new DataFrames with the transformed features and the original labels
 train_lda_df = pd.DataFrame(X_train_lda, columns=['LDA_feature'])
 train_lda_df['y'] = y_train
 
@@ -35,8 +34,7 @@ holdout_lda_df['y'] = y_holdout
 train_lda_csv_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\flattened_train_LDA_data.csv"
 holdout_lda_csv_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\flattened_holdout_LDA_data.csv"
 
-# Write the transformed data to CSV files
 train_lda_df.to_csv(train_lda_csv_path, index=False)
 holdout_lda_df.to_csv(holdout_lda_csv_path, index=False)
 
-print("LDA transformation complete and CSV files saved.")
+print("LDA transformation complete and CSV files saved")
