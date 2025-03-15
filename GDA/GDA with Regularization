@@ -3,8 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 
-# It is assumed that the CSV files are formatted such that the last column
-# is the target label 'y' and all preceding columns are the features
+
+# last column is the target label 'y' and all preceding columns are the features
 train_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout Data\Flattened\holdout_combined_flattened_data.csv"
 test_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\TrainTest Data\Flattened\combined_flattened_data.csv"
 
@@ -106,7 +106,7 @@ for lambda_reg in lambda_values:
         best_test_accuracy = test_acc
         best_lambda = lambda_reg
 
-# Apply the best regularization found
+# Apply best reg found
 sigma_reg = sigma + best_lambda * np.eye(sigma.shape[0])
 sigma_inv = np.linalg.inv(sigma_reg)
 
