@@ -1,0 +1,384 @@
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+
+# Activation functions and their derivatives
+def relu(z):
+    """ReLu activation function"""
+    return np.maximum(0, z)
+
+def relu_derivative(a):
+    """'a' here is the activation output"""
+    return (a > 0).astype(float)
+
+def leaky_relu(x, alpha=0.01):
+    """
+    Compute the Leaky ReLU activation function.
+
+    Parameters:
+    x : float or np.array
+        Input value(s)
+    alpha : float, optional
+        Slope for negative values (default is 0.01)
+
+    Returns:
+    float or np.array
+        Output after applying Leaky ReLU
+    """
+    return np.where(x > 0, x, alpha * x)
+
+def leaky_relu_derivative(a, alpha=0.01):
+    """
+    Compute the derivative of the Leaky ReLU function.
+
+    Parameters:
+    x : float or np.array
+        Input value(s)
+    alpha : float, optional
+        Slope for negative values (default is 0.01)
+
+    Returns:
+    float or np.array
+        Derivative of Leaky ReLU
+    """
+    return np.where(a > 0, 1, alpha)
+
+def sigmoid(z):
+    """Sigmoid activation function"""
+    return 1 / (1 + np.exp(-z))
+
+def sigmoid_derivative(a):
+    """Derivative given activation output 'a'"""
+    return a * (1 - a)
+
+def softmax(z):
+    """Softmax activation function for our multi-class output (data can later be adjusted to have 3+ classes beyond novice/advanced)"""
+    # subtracting max for stability. does not affect softmax outcome
+    exp_z = np.exp(z - np.max(z, axis=1, keepdims=True))
+    return exp_z / np.sum(exp_z, axis=1, keepdims=True)
+
+# MLP class definition
+class MLP:
+    def __init__(self, layer_sizes, activation='relu'):
+        """
+        MLP class
+        
+        Parameters:
+        - layer_sizes: input and output dimensions of layer sizes
+        - activation: relu, sigmoid, or leaky relu
+        """
+        self.layer_sizes = layer_sizes
+        self.num_layers = len(layer_sizes)
+        self.weights = []
+        self.biases = []
+
+        if activation == 'relu':
+            self.activation = relu
+            self.activation_deriv = relu_derivative
+        elif activation == 'sigmoid':
+            self.activation = sigmoid
+            self.activation_deriv = sigmoid_derivative
+        elif activation == 'leaky_relu':
+            self.activation = leaky_relu
+            self.activation_deriv = leaky_relu_derivative
+        else:
+            raise ValueError('Undefined activation function')
+        
+        # Random weight He initialization and uniform 0 bias initialization
+        for i in range(self.num_layers - 1):
+            weight = np.random.randn(layer_sizes[i], layer_sizes[i + 1]) * np.sqrt(2. / layer_sizes[i])
+            bias = np.zeros((1, layer_sizes[i + 1]))
+            self.weights.append(weight)
+            self.biases.append(bias)
+
+    def forward(self, X):
+        """
+        Forward prop with dynamic programming
+        """
+        activations = [X]
+        # Z values:
+        pre_activations = []
+
+        A = X
+
+        # loop through hidden layers minus last one because that is output layer
+        for i in range(self.num_layers - 2):
+            Z = np.dot(A, self.weights[i]) + self.biases[i]
+            pre_activations.append(Z)
+            A = self.activation(Z)
+            activations.append(A)
+
+        # Final output layer:
+        Z = np.dot(A, self.weights[-1]) + self.biases[-1]
+        pre_activations.append(Z)
+        A = softmax(Z)
+        activations.append(A)
+
+        return activations, pre_activations
+    
+    def backward(self, X, Y, activations, pre_activations):
+        """
+        Back propagation using forward dynamic calculations
+        """
+        m = X.shape[0]
+        grads_W = [None] * len(self.weights)
+        grads_b = [None] * len(self.biases)
+
+        # gradient of output layer
+        dA = activations[-1] - Y
+        dZ = dA  # derivative of softmax with cross-entropy dZ = A - Y
+
+        grads_W[-1] = np.dot(activations[-2].T, dZ) / m
+        grads_b[-1] = np.sum(dZ, axis=0, keepdims=True) / m
+
+        # rest of backprop for hidden layers:
+        dA_prev = np.dot(dZ, self.weights[-1].T)
+
+        for l in range(2, self.num_layers):
+            Z = pre_activations[-l]
+            dZ = dA_prev * self.activation_deriv(activations[-l])
+            grads_W[-l] = np.dot(activations[(-l) - 1].T, dZ) / m
+            grads_b[-l] = np.sum(dZ, axis=0, keepdims=True) / m
+            dA_prev = np.dot(dZ, self.weights[-l].T)
+
+        return grads_W, grads_b
+    
+    def update_parameters(self, grads_W, grads_b, learning_rate):
+        """
+        Update weights and biases through gradient descent
+        """
+        for i in range(len(self.weights)):
+            self.weights[i] -= learning_rate * grads_W[i]
+            self.biases[i] -= learning_rate * grads_b[i]
+
+    def compute_loss(self, Y, Y_pred):
+        """
+        Cross-entropy loss
+        
+        Parameters:
+        - Y: True labels (one-hot)
+        - Y_pred: Predicted probabilities from MLP
+        """
+        m = Y.shape[0]
+        loss = -np.sum(Y * np.log(Y_pred + 1e-8)) / m
+        return loss
+    
+    def train(self, X, Y, epochs=1000, learning_rate=0.01, batch_size=20, verbose=True):
+        """
+        Train the MLP model.
+        
+        Parameters:
+        - X: Input data
+        - Y: One-hot encoded labels
+        - epochs: Number of epochs for training
+        - learning_rate: Learning rate for gradient descent
+        - batch_size: Batch size for training
+        - verbose: If True, prints the loss every 100 epochs
+        """
+        num_train_samples = X.shape[0]
+        
+        for i in range(epochs):
+            permutation = np.random.permutation(num_train_samples)
+            X_shuffled = X[permutation]
+            Y_shuffled = Y[permutation]
+
+            for j in range(num_train_samples // batch_size):
+                indices = np.random.choice(num_train_samples, batch_size, replace=False)  # Random sample
+                X_batch = X[indices]  # Select batch randomly each iteration
+                Y_batch = Y[indices]
+                # Forward pass:
+                activations, pre_activations = self.forward(X_batch)
+                # Backward pass:
+                grads_W, grads_b = self.backward(X_batch, Y_batch, activations, pre_activations)
+                # Update parameters:
+                self.update_parameters(grads_W, grads_b, learning_rate)
+
+            if verbose and i % 100 == 0:
+                loss = self.compute_loss(Y_batch, activations[-1])
+                print(f"Epoch {i}: Loss = {loss:.4f}")
+
+    def predict(self, X):
+        """
+        Predicts class labels for evaluation data
+        """
+        activations, _ = self.forward(X)
+
+        # probs = softmax(activations[-1])
+        # predictions = np.argmax(probs, axis=1)
+
+        return np.argmax(activations[-1], axis=1)
+
+# Grid search function for hyperparameter tuning
+def grid_search_mlp(X_train, Y_train, X_val, Y_val, hyperparams):
+    best_config = None
+    best_accuracy = 0.0
+
+    for layer_sizes in hyperparams['layer_sizes']:
+        for lr in hyperparams['learning_rate']:
+            for epochs in hyperparams['epochs']:
+                print(f"\nTesting configuration: Layers = {layer_sizes}, Learning Rate = {lr}, Epochs = {epochs}")
+                # Create a new instance of the MLP for each configuration
+                model = MLP(layer_sizes, activation='leaky_relu')
+                # Train on the training portion
+                model.train(X_train, Y_train, epochs=epochs, learning_rate=lr, verbose=False)
+                # Evaluate on the validation set
+                preds = model.predict(X_val)
+                true = np.argmax(Y_val, axis=1)
+                acc = np.mean(preds == true)
+                print(f"Validation Accuracy: {acc:.4f}")
+
+                # Save the configuration if it's the best so far
+                if acc > best_accuracy:
+                    best_accuracy = acc
+                    best_config = {
+                        'layer_sizes': layer_sizes,
+                        'learning_rate': lr,
+                        'epochs': epochs,
+                        'accuracy': acc
+                    }
+    return best_config
+
+if __name__ == "__main__":
+    # Load training data
+    file_name = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\PCA_6comp_train_data.csv'
+    df = pd.read_csv(file_name)
+    num_features = df.shape[1] - 1
+    feature_columns = df.columns[:num_features]
+    target_column = df.columns[num_features]
+    
+    X = df[feature_columns].values
+    y = df[target_column].values   
+    Y = pd.get_dummies(y).values  # one-hot encoding
+
+    # # hyperparams for all features HMM probs:
+    # hyperparams = {
+    #     'layer_sizes': [
+    #         # [num_features, 32, 64, 32, Y.shape[1]],
+    #         # [num_features, 32, 64, Y.shape[1]],
+    #         # [num_features, 25, 35, 45, 35, Y.shape[1]],
+    #         # [num_features, 28, 54, Y.shape[1]],
+    #         # [num_features, 25, 50, 25, Y.shape[1]],
+    #         # [num_features, 32, 64, 32, 16, Y.shape[1]],
+    #         # [num_features, 32, 64, 128, 64, 32, Y.shape[1]]
+    #         [num_features, 32, Y.shape[1]]
+    #         #[num_features, 16, 64, 16, Y.shape[1]]
+    #     ],
+    #     # 'learning_rate': [0.0001, 0.0005, 0.001, 0.00025], # 0.0003 lower learning rate best so far
+    #     # 'epochs': [1000, 5000, 10000] # 5000 best so far
+    #     'learning_rate': [0.00001],
+    #     'epochs': [1000]
+    # }
+
+    # # hyperparams for PCA with less features HMM probs:
+    hyperparams = {
+        'layer_sizes': [
+            # [num_features, 16, 32, 64, 32, 16, Y.shape[1]],
+            # [num_features, 16, 32, 16, Y.shape[1]],
+            # [num_features, 64, 32, Y.shape[1]],
+            # [num_features, 32, 64, Y.shape[1]],
+            # [num_features, 5, 10, 5, Y.shape[1]]
+            [num_features, 128, Y.shape[1]]
+        ],
+        'learning_rate': [0.001, 0.01, 0.1, 0.0005, 0.0003],
+        'epochs': [1000]
+    }
+
+    # # hyperparams for convolved data:
+    # hyperparams = {
+    #     'layer_sizes': [
+    #         # [num_features, 300, 600, 300, Y.shape[1]],
+    #         [num_features, 64, 32, Y.shape[1]],
+    #         [num_features, 32, 64, Y.shape[1]],
+    #         #[num_features, 300, 400, Y.shape[1]],
+    #         # [num_features, 300, 500, 400, 50, Y.shape[1]]
+    #     ],
+    #     'learning_rate': [0.1, 0.01, 0.001],
+    #     'epochs': [5000]
+    # }
+
+    # # hyperparams for LDA data:
+    # hyperparams = {
+    #     'layer_sizes': [
+            
+    #         # [num_features, 4, 2, Y.shape[1]],
+    #         # [num_features, 2, 4, Y.shape[1]],
+    #         # [num_features, 4, 8, Y.shape[1]],
+    #         # [num_features, 8, 4, Y.shape[1]],
+    #         # [num_features, 64, 32, Y.shape[1]]
+    #         # [num_features, 2, 4, 2, Y.shape[1]],
+    #         # [num_features, 4, 8, 4, Y.shape[1]]
+    #         [num_features, 8, Y.shape[1]]
+            
+    #     ],
+    #     'learning_rate': [0.1, 0.01, 0.001],
+    #     'epochs': [1000, 5000]
+    # }
+
+    # hyperparams for flattened data:
+    # hyperparams = {
+    #     'layer_sizes': [
+    #         [num_features, 100, 50, Y.shape[1]],
+    #         # [num_features, 1400, 1600, 1400, 50 Y.shape[1]],
+    #         # [num_features, 64, 32, Y.shape[1]],
+    #         # [num_features, 32, 64, Y.shape[1]],
+    #         # [num_features, 500, 1000, 500, Y.shape[1]]
+    #     ],
+    #     'learning_rate': [0.0001, 0.001, 0.01],
+    #     'epochs': [5000]
+    # }
+    
+    # Set hold_test to either True (using an external holdout file) or False (splitting the combined data)
+    hold_test = True
+    
+    if hold_test == False:
+        # Split the combined traintest data into train and test sets
+        X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=0.2, random_state=42)
+        # Further split X_train for grid search into a training and validation set
+        X_train_full, X_val, Y_train_full, Y_val = train_test_split(X_train, Y_train, test_size=0.2, random_state=42)
+        
+        # Run grid search on the training portion
+        best_config = grid_search_mlp(X_train_full, Y_train_full, X_val, Y_val, hyperparams)
+        print("\nBest configuration found:")
+        print(best_config)
+        
+        # Retrain the model on the entire training set using the best hyperparameters
+        best_model = MLP(best_config['layer_sizes'], activation='leaky_relu')
+        best_model.train(X_train, Y_train, epochs=best_config['epochs'], learning_rate=best_config['learning_rate'], verbose=True)
+        
+        # Evaluate on the test set
+        preds_test = best_model.predict(X_test)
+        true_test = np.argmax(Y_test, axis=1)
+        test_accuracy = np.mean(preds_test == true_test)
+        print(f"\nTest Accuracy: {test_accuracy * 100:.2f}%")
+        
+        print("\nConfusion Matrix:")
+        print(confusion_matrix(true_test, preds_test))
+        print("\nClassification Report:")
+        print(classification_report(true_test, preds_test))
+    else:
+        # Use external holdout file for testing
+        df_hold = pd.read_csv(r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\PCA_6comp_holdout_data.csv')
+        X_hold = df_hold[feature_columns].values
+        y_hold = df_hold[target_column].values
+        Y_hold = pd.get_dummies(y_hold).values
+        
+        # Run grid search on the combined traintest data (split into training and validation)
+        X_train_full, X_val, Y_train_full, Y_val = train_test_split(X, Y, test_size=0.2, random_state=42)
+        best_config = grid_search_mlp(X_train_full, Y_train_full, X_val, Y_val, hyperparams)
+        print("\nBest configuration found:")
+        print(best_config)
+        
+        # Retrain using the best hyperparameters found on all traintest data
+        best_model = MLP(best_config['layer_sizes'], activation='leaky_relu')
+        best_model.train(X, Y, epochs=best_config['epochs'], learning_rate=best_config['learning_rate'], verbose=True)
+        
+        preds_hold = best_model.predict(X_hold)
+        true_hold = np.argmax(Y_hold, axis=1)
+        hold_accuracy = np.mean(preds_hold == true_hold)
+        print(f"\nHold-out Test Accuracy: {hold_accuracy * 100:.2f}%")
+        
+        print("\nConfusion Matrix:")
+        print(confusion_matrix(true_hold, preds_hold))
+        print("\nClassification Report:")
+        print(classification_report(true_hold, preds_hold))

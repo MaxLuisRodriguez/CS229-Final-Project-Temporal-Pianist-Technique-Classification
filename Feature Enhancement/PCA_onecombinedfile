@@ -1,0 +1,134 @@
+import numpy as np
+import pandas as pd
+
+def load_data(file_path):
+    """Loads the CSV data into a Pandas DataFrame."""
+    return pd.read_csv(file_path)
+
+def standardize_data(data, mean=None, std_dev=None):
+    """
+    Standardizes dataset by subtracting the mean and dividing by the standard deviation.
+    If mean and std_dev are provided (for holdout data), use them.
+    """
+    if mean is None or std_dev is None:
+        mean = np.mean(data, axis=0)
+        std_dev = np.std(data, axis=0, ddof=1) # ddof = 1 because working with sample
+    standardized_data = (data - mean) / std_dev
+    return standardized_data, mean, std_dev
+
+def compute_covariance_matrix(data):
+    """Computes the covariance matrix of the standardized data."""
+    return np.cov(data, rowvar=False)
+
+def compute_eigenvalues_and_vectors(cov_matrix):
+    """Computes eigenvalues and eigenvectors of the covariance matrix."""
+    return np.linalg.eigh(cov_matrix)
+
+def sort_eigenvalues_and_vectors(eigenvalues, eigenvectors):
+    """Sorts eigenvalues and corresponding eigenvectors in descending order."""
+    sorted_indices = np.argsort(eigenvalues)[::-1]
+    return eigenvalues[sorted_indices], eigenvectors[:, sorted_indices]
+
+def project_data(data, eigenvectors, num_components):
+    """Projects the standardized data onto the top principal components."""
+    top_eigenvectors = eigenvectors[:, :num_components]
+    return np.dot(data, top_eigenvectors) # multiply data by top eigenvectors to be left with principal comps
+
+def perform_pca(file_path, num_components, label_column=True, holdout=False, holdout_file_path=None):
+    """
+    Performs PCA on a CSV file, optionally handling a holdout dataset.
+    
+    Parameters:
+        file_path: Path to the training CSV file.
+        num_components: Number of principal components to keep.
+        label_column: If True, assumes the last column is a label and ignores it during PCA.
+        holdout: If True, applies trained PCA to a holdout dataset.
+        holdout_file_path: Path to the holdout CSV file (only used if holdout=True).
+    
+    Returns:
+        projected_train_data (numpy.ndarray): Training data projected onto principal components.
+        sorted_eigenvalues (numpy.ndarray): Eigenvalues sorted in descending order.
+        labels_train (numpy.ndarray or None): Training labels (if label_column=True).
+        projected_holdout_data (numpy.ndarray or None): Holdout data projected onto PCA space (if holdout=True).
+        labels_holdout (numpy.ndarray or None): Holdout labels (if holdout=True).
+    """
+    # Load training data
+    df_train = load_data(file_path)
+
+    # Extract labels if applicable
+    labels_train = None
+    if label_column:
+        labels_train = df_train.iloc[:, -1].values  # Extract labels (last column)
+        df_train = df_train.iloc[:, :-1]  # Remove label column from features
+
+    # Convert DataFrame to NumPy array
+    data_train = df_train.values
+
+    # Standardize training data
+    standardized_train, mean_train, std_dev_train = standardize_data(data_train)
+
+    # Compute PCA on training data
+    cov_matrix = compute_covariance_matrix(standardized_train)
+    eigenvalues, eigenvectors = compute_eigenvalues_and_vectors(cov_matrix)
+    sorted_eigenvalues, sorted_eigenvectors = sort_eigenvalues_and_vectors(eigenvalues, eigenvectors)
+
+    # Project training data onto principal components
+    projected_train_data = project_data(standardized_train, sorted_eigenvectors, num_components)
+
+    # Process holdout data if applicable
+    projected_holdout_data = None
+    labels_holdout = None
+    if holdout and holdout_file_path:
+        df_holdout = load_data(holdout_file_path)
+
+        # Extract holdout labels if applicable
+        if label_column:
+            labels_holdout = df_holdout.iloc[:, -1].values
+            df_holdout = df_holdout.iloc[:, :-1]
+
+        # Convert holdout DataFrame to NumPy array
+        data_holdout = df_holdout.values
+
+        # Standardize holdout data using training mean and std_dev
+        standardized_holdout, _, _ = standardize_data(data_holdout, mean_train, std_dev_train)
+
+        # Project holdout data onto !!!training!!! principal components
+        projected_holdout_data = project_data(standardized_holdout, sorted_eigenvectors, num_components)
+
+    return projected_train_data, sorted_eigenvalues, labels_train, projected_holdout_data, labels_holdout
+
+if __name__ == '__main__':
+    # File paths
+    train_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Probabilities TrainTest\6comp probs\6comp_MLP_traintest_combined.csv'
+    holdout_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout\6 State Probs\6comp_holdout_MLP_traintest_combined.csv'  # Change as needed
+    num_components = 10  # Adjust as needed
+    label_column = True  # Set to False if no label column
+    holdout = True  # Set to True if applying PCA to holdout data
+
+    # Perform PCA
+    projected_train, eigenvalues, labels_train, projected_holdout, labels_holdout = perform_pca(
+        train_file_path, num_components, label_column, holdout, holdout_file_path
+    )
+
+    # Save transformed training data
+    col_names = [f'PC{i+1}' for i in range(num_components)]
+    train_df = pd.DataFrame(projected_train, columns=col_names)
+    if label_column:
+        train_df['Label'] = labels_train
+
+    train_output_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\PCA_6comp_train_data.csv'
+    train_df.to_csv(train_output_path, index=False)
+
+    # Save transformed holdout data if applicable
+    if holdout:
+        holdout_df = pd.DataFrame(projected_holdout, columns=col_names)
+        if label_column:
+            holdout_df['Label'] = labels_holdout
+
+        holdout_output_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\PCA_6comp_holdout_data.csv'
+        holdout_df.to_csv(holdout_output_path, index=False)
+
+    print("PCA transformation complete.")
+    print(f"Training Data Shape: {projected_train.shape}")
+    print(f"Holdout Data Shape: {projected_holdout.shape if holdout else 'N/A'}")
+    print("Top Eigenvalues:", eigenvalues[:num_components])

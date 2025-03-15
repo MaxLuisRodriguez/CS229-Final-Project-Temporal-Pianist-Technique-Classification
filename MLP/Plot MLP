@@ -1,0 +1,132 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+# MLP class definition
+class MLP:
+    def __init__(self, layer_sizes, activation='relu'):
+        self.layer_sizes = layer_sizes
+        self.num_layers = len(layer_sizes)
+        self.weights = []
+        self.biases = []
+
+        if activation == 'relu':
+            self.activation = lambda z: np.maximum(0, z)
+            self.activation_deriv = lambda a: (a > 0).astype(float)
+        elif activation == 'sigmoid':
+            self.activation = lambda z: 1 / (1 + np.exp(-z))
+            self.activation_deriv = lambda a: a * (1 - a)
+        elif activation == 'leaky_relu':
+            self.activation = lambda x, alpha=0.01: np.where(x > 0, x, alpha * x)
+            self.activation_deriv = lambda a, alpha=0.01: np.where(a > 0, 1, alpha)
+        else:
+            raise ValueError('Undefined activation function')
+        
+        for i in range(self.num_layers - 1):
+            weight = np.random.randn(layer_sizes[i], layer_sizes[i + 1]) * np.sqrt(2. / layer_sizes[i])
+            bias = np.zeros((1, layer_sizes[i + 1]))
+            self.weights.append(weight)
+            self.biases.append(bias)
+
+    def forward(self, X):
+        activations = [X]
+        pre_activations = []
+        A = X
+        for i in range(self.num_layers - 2):
+            Z = np.dot(A, self.weights[i]) + self.biases[i]
+            pre_activations.append(Z)
+            A = self.activation(Z)
+            activations.append(A)
+        Z = np.dot(A, self.weights[-1]) + self.biases[-1]
+        pre_activations.append(Z)
+        A = np.exp(Z - np.max(Z, axis=1, keepdims=True)) / np.sum(np.exp(Z - np.max(Z, axis=1, keepdims=True)), axis=1, keepdims=True)
+        activations.append(A)
+        return activations, pre_activations
+
+    def train(self, X, Y, epochs=1000, learning_rate=0.01, verbose=False):
+        num_train_samples = X.shape[0]
+        for i in range(epochs):
+            activations, pre_activations = self.forward(X)
+            dA = activations[-1] - Y
+            dZ = dA
+            grads_W = [np.dot(activations[-2].T, dZ) / num_train_samples]
+            grads_b = [np.sum(dZ, axis=0, keepdims=True) / num_train_samples]
+            dA_prev = np.dot(dZ, self.weights[-1].T)
+            for l in range(2, self.num_layers):
+                Z = pre_activations[-l]
+                dZ = dA_prev * self.activation_deriv(activations[-l])
+                grads_W.insert(0, np.dot(activations[(-l) - 1].T, dZ) / num_train_samples)
+                grads_b.insert(0, np.sum(dZ, axis=0, keepdims=True) / num_train_samples)
+                dA_prev = np.dot(dZ, self.weights[-l].T)
+            for i in range(len(self.weights)):
+                self.weights[i] -= learning_rate * grads_W[i]
+                self.biases[i] -= learning_rate * grads_b[i]
+
+    def predict(self, X):
+        activations, _ = self.forward(X)
+        return np.argmax(activations[-1], axis=1)
+
+# Load train dataset
+file_name = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\TrainTest Data\Convolved\PCA_conv_train_data.csv'
+df = pd.read_csv(file_name)
+
+num_features = df.shape[1] - 1
+feature_columns = df.columns[:num_features]
+target_column = df.columns[num_features]
+X = df[feature_columns].values
+y = df[target_column].values
+Y = pd.get_dummies(y).values
+
+# Load holdout dataset
+hold_test = True
+hold_file_name = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout Data\Convolved\PCA_conv_holdout_data.csv'
+df2 = pd.read_csv(hold_file_name)
+X_train = X
+y_train = Y
+X_test = df2[feature_columns].values
+y_test = pd.get_dummies(df2[target_column]).values
+
+# Define hyperparameter ranges
+layer_sizes_values = [
+    [num_features, 16, Y.shape[1]],
+    [num_features, 32, Y.shape[1]],
+    [num_features, 64, Y.shape[1]],
+    [num_features, 128, Y.shape[1]],
+    [num_features, 16, 32, Y.shape[1]],
+    [num_features, 64, 32, Y.shape[1]],
+    [num_features, 32, 64, Y.shape[1]],
+    [num_features, 128, 64, Y.shape[1]],
+    [num_features, 128, 64, 32, Y.shape[1]],
+    [num_features, 64, 128, 64, Y.shape[1]],
+    [num_features, 64, 128, 64, 32, Y.shape[1]]
+]
+
+# Store results
+results = []
+
+for layer_sizes in layer_sizes_values:
+    clf = MLP(layer_sizes, activation='leaky_relu')
+    clf.train(X_train, y_train, epochs=1000, learning_rate=0.001, verbose=False)
+    y_pred_train = clf.predict(X_train)
+    train_accuracy = accuracy_score(np.argmax(y_train, axis=1), y_pred_train)
+    y_pred_test = clf.predict(X_test)
+    test_accuracy = accuracy_score(np.argmax(y_test, axis=1), y_pred_test)
+    results.append([str(layer_sizes), train_accuracy, test_accuracy])
+
+# Convert to DataFrame
+results_df = pd.DataFrame(results, columns=['Layer Sizes', 'Train Accuracy', 'Test Accuracy'])
+
+# Plot results
+plt.figure(figsize=(8, 6))
+plt.plot(results_df['Layer Sizes'], results_df['Test Accuracy'], marker='o', label='Test Accuracy')
+plt.plot(results_df['Layer Sizes'], results_df['Train Accuracy'], marker='s', label='Train Accuracy')
+
+plt.xlabel('Layer Sizes')
+plt.ylabel('Accuracy')
+plt.title('MLP Hyperparameter Tuning (Layer Complexity)')
+plt.xticks(rotation=45)
+plt.legend()
+plt.grid()
+plt.show()

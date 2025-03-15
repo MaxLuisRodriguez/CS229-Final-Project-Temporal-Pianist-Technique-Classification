@@ -1,0 +1,90 @@
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import AdaBoostClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix
+
+# load training data
+train_file = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Probabilities TrainTest\6comp probs\6comp_MLP_traintest_combined.csv'
+df_train = pd.read_csv(train_file)
+
+# last column is label and the rest are features
+num_features = df_train.shape[1] - 1
+feature_columns = df_train.columns[:num_features]
+target_column = df_train.columns[num_features]
+
+X_train = df_train[feature_columns].values
+y_train = df_train[target_column].values
+
+# ----- KMeans Clustering -----
+# Cluster the training examples into n activity clusters
+####################################
+num_clusters = 6
+#####################################
+kmeans = KMeans(n_clusters=num_clusters, random_state=42, n_init=10)
+cluster_labels = kmeans.fit_predict(X_train)
+centroids = kmeans.cluster_centers_
+
+# ----- Train AdaBoost Classifiers for Each Cluster -----
+# Dictionary to hold the classifier for each of n activity clusters
+classifiers = {}
+
+# For each cluster, select the training data and train an AdaBoost classifier
+for cluster in range(num_clusters):
+    # find indices of training samples that fall into current cluster
+    indices = np.where(cluster_labels == cluster)[0]
+    
+    # Skip empty clusters 
+    if len(indices) == 0:
+        print(f"Skipping cluster {cluster} (no assigned data points)")
+        continue
+    
+    X_cluster = X_train[indices]
+    y_cluster = y_train[indices]
+    
+    # Train AdaBoost classifier using a decision tree as the base estimator.
+    clf = AdaBoostClassifier(
+        estimator=DecisionTreeClassifier(max_depth=4),
+        n_estimators=50,
+        random_state=42
+    )
+    clf.fit(X_cluster, y_cluster)
+    classifiers[cluster] = clf
+    print(f"Trained AdaBoost classifier for cluster {cluster} on {len(indices)} samples.")
+
+# load Holdout Data
+holdout_file = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout\6 State Probs\6comp_holdout_MLP_traintest_combined.csv'
+df_hold = pd.read_csv(holdout_file)
+
+# !!! assumes holdout data uses the same feature columns as the training data
+X_hold = np.array(df_hold[feature_columns].values)
+y_hold = np.array(df_hold[target_column].values)
+
+print(f"Loaded holdout data with {len(X_hold)} samples")
+
+# ----- Assign Holdout Samples to Clusters & Predict -----
+predictions = []
+for x in X_hold:
+    # Compute Euclidean distance to each cluster centroid
+    distances = np.linalg.norm(centroids - x, axis=1)
+    closest_cluster = np.argmin(distances)
+    
+    # Ensure a classifier exists for the assigned cluster
+    if closest_cluster not in classifiers:
+        print(f"Warning: No classifier trained for cluster {closest_cluster}. Assigning default class.")
+        pred = np.random.choice(y_train)  # Assign a random class or majority class
+    else:
+        # Predict level of pianist technique example using classifier of best activity fit
+        pred = classifiers[closest_cluster].predict([x])[0]
+    
+    predictions.append(pred)
+
+# ----- Evaluate Overall Accuracy -----
+accuracy = accuracy_score(y_hold, predictions)
+print(f"\nTotal accuracy on holdout data: {accuracy * 100:.2f}%")
+
+# Generate and Print Confusion Matrix
+cm = confusion_matrix(y_hold, predictions)
+print("\nConfusion Matrix:")
+print(cm)

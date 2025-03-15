@@ -1,0 +1,204 @@
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+
+
+# It is assumed that the CSV files are formatted such that the last column
+# is the target label 'y' and all preceding columns are the features
+train_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\TrainTest Data\6comp probs\PCA_6comp_train_data.csv"
+test_path = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout Data\6 State Probs\PCA_6comp_holdout_data.csv"
+
+train_set = pd.read_csv(train_path)
+test_set = pd.read_csv(test_path)
+
+# For both training and test datasets, separate the features (X) from the labels (y)
+# - X_train and X_test: All columns except the last one are used as features
+# - y_train and y_test: The column named "y" is used as the label
+y_label = train_set.columns[-1]
+
+X_train = train_set.iloc[:, :-1].values  # Features from training set
+y_train = train_set[y_label].values          # Labels from training set
+
+X_test = test_set.iloc[:, :-1].values    # Features from test set
+y_test = test_set[y_label].values            # Labels from test set
+
+def compute_gda_params(X, y):
+    """
+    Compute the parameters required for Gaussian Discriminant Analysis (GDA).
+
+    Parameters:
+        X (numpy.ndarray): The feature matrix with shape (m, n), where m is the
+                           number of samples and n is the number of features.
+        y (numpy.ndarray): The label vector of length m containing binary class labels (0 or 1).
+
+    Returns:
+        phi (float): The prior probability of class 1, computed as the fraction of samples with y = 1.
+        mu_0 (numpy.ndarray): The mean vector for class 0 (features averaged over samples where y = 0).
+        mu_1 (numpy.ndarray): The mean vector for class 1 (features averaged over samples where y = 1).
+        sigma (numpy.ndarray): The shared covariance matrix computed using all training samples.
+    """
+    m, n = X.shape  # m = number of samples, n = number of features
+    
+    # Compute the prior probability for class 1 (P(y=1))
+    phi = np.mean(y)
+    
+    # Compute the mean vectors for each class:
+    # mu_0: Average of all feature vectors where the label is 0.
+    # mu_1: Average of all feature vectors where the label is 1.
+    mu_0 = np.mean(X[y == 0], axis=0)
+    mu_1 = np.mean(X[y == 1], axis=0)
+    
+    # Initialize the covariance matrix with zeros.
+    sigma = np.zeros((n, n))
+    
+    # Accumulate the covariance contributions from each sample.
+    # For each sample, compute the outer product of the difference between the sample and its class mean.
+    for i in range(m):
+        x_i = X[i].reshape(-1, 1)  # Reshape the sample into a column vector for matrix operations.
+        # Select the corresponding class mean based on the sample's label.
+        mu_i = mu_1.reshape(-1, 1) if y[i] == 1 else mu_0.reshape(-1, 1)
+        # Accumulate the outer product.
+        sigma += (x_i - mu_i) @ (x_i - mu_i).T
+    # Normalize by the number of samples to obtain the average covariance matrix.
+    sigma /= m
+    
+    return phi, mu_0, mu_1, sigma
+
+# Compute the GDA parameters using the training set.
+phi, mu_0, mu_1, sigma = compute_gda_params(X_train, y_train)
+
+
+# Compute inverse of the covariance matrix for decision function.
+sigma_inv = np.linalg.inv(sigma)
+
+def gda_predict(X, phi, mu_0, mu_1, sigma_inv):
+    """
+    Predict class labels for a set of samples using Gaussian Discriminant Analysis (GDA).
+
+    Parameters:
+        X (numpy.ndarray): The feature matrix for samples to classify.
+        phi: The prior probability of class 1 (P(y=1)).
+        mu_0 (numpy.ndarray): The mean vector for class 0.
+        mu_1 (numpy.ndarray): The mean vector for class 1.
+        sigma_inv (numpy.ndarray): The inverse of the shared covariance matrix.
+    
+    Returns:
+        numpy.ndarray: An array of predicted class labels (0 or 1) for each sample in X.
+    """
+    predictions = []  # List to store the computed decision values for each sample.
+    
+    # Calculate the logarithm of the prior ratio:
+    log_prior_ratio = np.log(phi / (1 - phi)) # used because priors are not always equal with current data set
+
+    # Process each sample in the input feature matrix
+    for x in X:
+        x = x.reshape(-1, 1)  # Convert the sample into a column vector
+        
+        # Compute the quadratic form for class 1:
+        term1 = -0.5 * (x - mu_1.reshape(-1, 1)).T @ sigma_inv @ (x - mu_1.reshape(-1, 1))
+        
+        # Compute the quadratic form for class 0:
+        term0 = -0.5 * (x - mu_0.reshape(-1, 1)).T @ sigma_inv @ (x - mu_0.reshape(-1, 1))
+        
+        # If the decision value is greater than zero, the sample is more likely to belong to class 1.
+        decision = term1 - term0 + log_prior_ratio
+        
+        # Extract the scalar value from the 1x1 matrix and store it.
+        predictions.append(decision.item())
+    
+    # Convert decision values to binary class predictions:
+    # Return 1 if the decision value > 0, else 0
+    return (np.array(predictions) > 0).astype(int)
+
+# Use the GDA model to predict class labels for both the training and testing datasets.
+y_pred_train = gda_predict(X_train, phi, mu_0, mu_1, sigma_inv)
+y_pred_test = gda_predict(X_test, phi, mu_0, mu_1, sigma_inv)
+
+def compute_accuracy(y_true, y_pred):
+    """
+    Compute the accuracy of the model by comparing true labels with predicted labels.
+
+    Parameters:
+        y_true (numpy.ndarray): True class labels.
+        y_pred (numpy.ndarray): Predicted class labels by the model.
+    
+    Returns:
+        float: The accuracy as a fraction of correct predictions.
+    """
+    return np.mean(y_true == y_pred)
+
+# Compute evaluation metrics
+def compute_metrics(y_true, y_pred, dataset_name="Dataset"):
+    accuracy = np.mean(y_true == y_pred)
+    precision = precision_score(y_true, y_pred, zero_division=0)
+    recall = recall_score(y_true, y_pred, zero_division=0)
+    f1 = f1_score(y_true, y_pred, zero_division=0)
+    conf_matrix = confusion_matrix(y_true, y_pred)
+
+    print(f"\n{dataset_name} Metrics")
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+    print("Confusion Matrix:\n", conf_matrix)
+
+# Compute and print metrics for training and test sets
+compute_metrics(y_train, y_pred_train, dataset_name="Training Set")
+compute_metrics(y_test, y_pred_test, dataset_name="Test Set")
+
+
+# If PCA num components == 2 then we can plot 2D chart with decision boundary
+if X_train.shape[1] - 1 == 2:
+
+    # Define the grid limits with some margin based on the training data
+    margin = 1.0
+    x_min, x_max = X_train[:, 0].min() - margin, X_train[:, 0].max() + margin
+    y_min, y_max = X_train[:, 1].min() - margin, X_train[:, 1].max() + margin
+
+    # Create a meshgrid for plotting the decision boundary
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 300),
+                        np.linspace(y_min, y_max, 300))
+    grid = np.c_[xx.ravel(), yy.ravel()]
+
+    # Precompute the log prior ratio used in the decision function
+    log_prior_ratio = np.log(phi / (1 - phi))
+
+    def decision_function(x):
+        """
+        Compute the decision value for a given sample x.
+        A decision value of 0 corresponds to the decision boundary.
+        """
+        # Reshape the point to a column vector
+        x = x.reshape(-1, 1)
+        term1 = -0.5 * (x - mu_1.reshape(-1, 1)).T @ sigma_inv @ (x - mu_1.reshape(-1, 1))
+        term0 = -0.5 * (x - mu_0.reshape(-1, 1)).T @ sigma_inv @ (x - mu_0.reshape(-1, 1))
+        return (term1 - term0 + log_prior_ratio).item()
+
+    # Compute decision values for each point in the grid
+    Z = np.array([decision_function(point) for point in grid])
+    Z = Z.reshape(xx.shape)
+
+    # Create the plot
+    plt.figure(figsize=(8, 6))
+
+    # Plot the decision boundary where decision function equals 0
+    plt.contour(xx, yy, Z, levels=[0], colors='black', linewidths=2)
+
+    # Plot the training data points with different markers and colors for each class
+    markers = {0: 'o', 1: 's'}
+    colors = {0: 'blue', 1: 'red'}
+
+    for class_label in [0, 1]:
+        idx = (y_train == class_label)
+        plt.scatter(X_train[idx, 0], X_train[idx, 1],
+                    marker=markers[class_label],
+                    color=colors[class_label],
+                    edgecolors='k',
+                    label=f'Class {class_label}')
+
+    plt.xlabel('Feature 1')
+    plt.ylabel('Feature 2')
+    plt.title('GDA Decision Boundary and Training Data')
+    plt.legend()
+    plt.show()

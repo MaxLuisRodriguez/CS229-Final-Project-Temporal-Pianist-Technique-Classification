@@ -1,0 +1,132 @@
+import numpy as np
+import pandas as pd
+from scipy.signal import convolve2d
+
+def flatten_sequences(file_path, sequence_length=20):
+    """
+    Loads the CSV file and groups every sequence_length rows as one sequence.
+    Each sequence is flattened into a single data point (vector).
+    
+    Parameters:
+        file_path: Path to the CSV file.
+        sequence_length: Number of rows per sequence.
+        
+    Returns:
+        numpy.ndarray: Array of shape (num_sequences, sequence_length*63)
+    """
+    df = pd.read_csv(file_path)
+    data = df.values  # shape: (num_rows, 63)
+    num_sequences = data.shape[0] // sequence_length
+    sequences = []
+    
+    for i in range(num_sequences):
+        seq = data[i*sequence_length:(i+1)*sequence_length, :]  # shape: (20, 63)
+        seq_flat = seq.flatten()  # flatten into a vector of length 20*63 = 1260
+        sequences.append(seq_flat)
+        
+    return np.array(sequences)
+
+def conv_sequences(file_path, sequence_length=20, kernel_size=(3,3), stride=(2,2)):
+    """
+    Loads CSV file, groups every sequence_length rows into one sequence,
+    reshapes each sequence into a 20x21x3 array (20 frames, 21 keypoints, 3 coordinates),
+    then applies a 2D convolution per channel (x, y, and z) and concatenates the
+    convolved outputs into one feature vector.
+    
+    Parameters:
+        file_path: Path to the CSV file.
+        sequence_length: Number of rows per sequence.
+        kernel_size: Size of the convolution kernel (height, width).
+        stride: Stride (vertical, horizontal) for subsampling the convolved output.
+        
+    Returns:
+        numpy.ndarray: Array of condensed features for each sequence.
+    """
+    df = pd.read_csv(file_path)
+    data = df.values  # shape: (num_rows, 63) (21 x,y,z coords)
+    num_sequences = data.shape[0] // sequence_length
+    conv_features = []
+    
+    # Define simple averaging kernel
+    kernel = np.ones(kernel_size) / (kernel_size[0] * kernel_size[1])
+    
+    for i in range(num_sequences):
+        seq = data[i*sequence_length:(i+1)*sequence_length, :]  # shape: (20, 63)
+        # Reshape to (20, 21, 3) where 21 keypoints and 3 coordinates (x,y,z)
+        seq_reshaped = seq.reshape(sequence_length, 21, 3)
+        
+        channel_features = []
+        for ch in range(3):
+            channel_data = seq_reshaped[:, :, ch]  # shape: (20, 21)
+            # Apply 2D convolution with 'valid' mode
+            # !!! no zero Padding applied
+            conv_result = convolve2d(channel_data, kernel, mode='valid')
+            # Subsample the convolved output using the given stride
+            conv_result_strided = conv_result[::stride[0], ::stride[1]]
+            # Flatten the convolved result for this channel
+            channel_features.append(conv_result_strided.flatten())
+            
+        # Concatenate features from all 3 channels into one vector
+        conv_features.append(np.concatenate(channel_features))
+        
+    return np.array(conv_features)
+
+def combine_and_label(flattened_beg, flattened_adv, label_beg=0, label_adv=1):
+    """
+    Combines beginner and advanced sequences and adds a label column.
+    
+    Parameters:
+        flattened_beg (numpy.ndarray): Processed beginner data (each row is one sequence).
+        flattened_adv (numpy.ndarray): Processed advanced data (each row is one sequence).
+        label_beg: Label for beginner data.
+        label_adv: Label for advanced data.
+        
+    Returns:
+        pandas.DataFrame: Combined dataset with a label column.
+    """
+    beg_labels = np.full((flattened_beg.shape[0], 1), label_beg) # Create labels for new 1D data vectors
+    adv_labels = np.full((flattened_adv.shape[0], 1), label_adv)
+    
+    beg_combined = np.hstack([flattened_beg, beg_labels]) # Add labels to 1D feature vectors
+    adv_combined = np.hstack([flattened_adv, adv_labels])
+    
+    combined = np.vstack([beg_combined, adv_combined]) # Combine advanced and beginner data
+    
+    # Create column names: feature_0, feature_1, ... feature_N, and "label"
+    num_features = combined.shape[1] - 1
+    columns = [f"feature_{i}" for i in range(num_features)] + ["label"]
+    return pd.DataFrame(combined, columns=columns)
+
+if __name__ == '__main__':
+    # File paths for beginner and advanced sequence data
+    beg_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Sequence Data\baselineflatconv_beg_seq_data.csv'
+    adv_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Sequence Data\baselineflatconv_adv_seq_data.csv'
+    
+    sequence_length = 20  # each sequence consists of 20 rows
+    
+    # ----- Keypoint Processing Method 1: Flattening -----
+    flattened_beg = flatten_sequences(beg_file_path, sequence_length)
+    flattened_adv = flatten_sequences(adv_file_path, sequence_length)
+    
+    combined_flattened_df = combine_and_label(flattened_beg, flattened_adv, label_beg=0, label_adv=1)
+    # Shuffle the combined flattened dataset
+    combined_flattened_df = combined_flattened_df.sample(frac=1, random_state=42).reset_index(drop=True)
+    # Save the combined flattened dataset to CSV
+    combined_flattened_df.to_csv(r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\Baseline Feature Tests\Results\combined_flattened_data.csv', index=False)
+    print("Combined flattened data shape:", combined_flattened_df.shape)
+    
+    # ----- Keypoint Processing Method 2: Convolution-Based Condensation -----
+    # kernel_size and stride adjusted as needed
+    kernel_size = (3, 3)
+    # 1260 features for each 20 by 63 sequence (63 coords)
+    stride = (2, 2) # Reduce total features by a factor of 4
+    
+    conv_beg = conv_sequences(beg_file_path, sequence_length, kernel_size, stride)
+    conv_adv = conv_sequences(adv_file_path, sequence_length, kernel_size, stride)
+    
+    combined_conv_df = combine_and_label(conv_beg, conv_adv, label_beg=0, label_adv=1)
+    # Shuffle the combined convolution-based dataset
+    combined_conv_df = combined_conv_df.sample(frac=1, random_state=42).reset_index(drop=True)
+    # Save the combined convolution-based dataset to CSV
+    combined_conv_df.to_csv(r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\Baseline Feature Tests\Results\combined_conv_data.csv', index=False)
+    print("Combined convolution-based data shape:", combined_conv_df.shape)

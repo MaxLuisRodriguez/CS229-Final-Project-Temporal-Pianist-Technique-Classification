@@ -1,0 +1,153 @@
+import numpy as np
+import pandas as pd
+
+def load_data(file_path):
+    """
+    Loads the CSV data into a Pandas DataFrame.
+    """
+    df = pd.read_csv(file_path)
+    return df
+
+def standardize_data(data, mean=None, std_dev=None):
+    """
+    Standardizes the dataset by subtracting the mean and dividing by the standard deviation.
+    If mean and std_dev are provided, use them for consistency.
+    """
+    if mean is None or std_dev is None:
+        mean = np.mean(data, axis=0)
+        std_dev = np.std(data, axis=0, ddof=1)  # ddof=1 for unbiased estimate
+    standardized_data = (data - mean) / std_dev
+    return standardized_data, mean, std_dev
+
+def compute_covariance_matrix(data):
+    """
+    Computes the covariance matrix of the standardized data.
+    """
+    covariance_matrix = np.cov(data, rowvar=False)
+    return covariance_matrix
+
+def compute_eigenvalues_and_vectors(cov_matrix):
+    """
+    Computes eigenvalues and eigenvectors of the covariance matrix.
+    """
+    eigenvalues, eigenvectors = np.linalg.eigh(cov_matrix)
+    return eigenvalues, eigenvectors
+
+def sort_eigenvalues_and_vectors(eigenvalues, eigenvectors):
+    """
+    Sorts eigenvalues and corresponding eigenvectors in descending order.
+    """
+    sorted_indices = np.argsort(eigenvalues)[::-1]
+    sorted_eigenvalues = eigenvalues[sorted_indices]
+    sorted_eigenvectors = eigenvectors[:, sorted_indices]
+    return sorted_eigenvalues, sorted_eigenvectors
+
+def project_data(data, eigenvectors, num_components):
+    """
+    Projects the standardized data onto the top principal components.
+    """
+    top_eigenvectors = eigenvectors[:, :num_components]
+    projected_data = np.dot(data, top_eigenvectors)
+    return projected_data
+
+def perform_pca_on_combined_data(beg_file_path, adv_file_path, num_components):
+    """
+    Performs PCA on the combined beginner and advanced datasets,
+    then applies the same transformation to each group.
+    """
+    # Load beginner and advanced datasets
+    beg_df = load_data(beg_file_path)
+    adv_df = load_data(adv_file_path)
+
+    # Add labels to the datasets (0 for beginner, 1 for advanced)
+    beg_df['label'] = 0
+    adv_df['label'] = 1
+
+    # Combine the datasets
+    combined_df = pd.concat([beg_df, adv_df], ignore_index=True)
+
+    # Split the combined data into features and labels
+    features = combined_df.iloc[:, :-1].values  # Assuming all columns except the last are features
+    labels = combined_df['label'].values  # Last column as label
+
+    # Standardize the data
+    standardized_combined, mean, std_dev = standardize_data(features)
+
+    # Compute PCA components
+    covariance_matrix = compute_covariance_matrix(standardized_combined)
+    eigenvalues, eigenvectors = compute_eigenvalues_and_vectors(covariance_matrix)
+    sorted_eigenvalues, sorted_eigenvectors = sort_eigenvalues_and_vectors(eigenvalues, eigenvectors)
+
+    # Split the data back into beginner and advanced based on the labels
+    beginner_data = standardized_combined[combined_df['label'] == 0]
+    advanced_data = standardized_combined[combined_df['label'] == 1]
+
+    # Project the data onto the top principal components
+    beginner_pca = project_data(beginner_data, sorted_eigenvectors, num_components)
+    advanced_pca = project_data(advanced_data, sorted_eigenvectors, num_components)
+
+    return beginner_pca, advanced_pca, sorted_eigenvalues
+
+# main
+# Example usage
+beg_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Probabilities\beg_prob_data.csv'  # Update with the actual file path
+adv_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Probabilities\adv_prob_data.csv'  # Update with the actual file path
+num_components = 5  # Adjust as needed
+
+holdout = False
+
+beg_holdout_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout\beg_holdout_prob_data.csv'
+adv_holdout_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout\adv_holdout_prob_data.csv'
+
+if not holdout:
+    # Original functionality for training and test data only
+    beginner_pca, advanced_pca, eigenvalues = perform_pca_on_combined_data(beg_file_path, adv_file_path, num_components)
+
+    # Save PCA outputs to CSVs
+    pd.DataFrame(beginner_pca).to_csv(f'{num_components}comp_beginner_pca_output.csv', index=False)
+    pd.DataFrame(advanced_pca).to_csv(f'{num_components}comp_advanced_pca_output.csv', index=False)
+
+    print("Beginner PCA Shape:", beginner_pca.shape)
+    print("Advanced PCA Shape:", advanced_pca.shape)
+    print("Top Eigenvalues:", eigenvalues[:num_components])
+
+else:
+    # Load all data
+    beg_df = load_data(beg_file_path)
+    adv_df = load_data(adv_file_path)
+    beg_holdout_df = load_data(beg_holdout_path)
+    adv_holdout_df = load_data(adv_holdout_path)
+    
+    # Extract features (no need for labels here)
+    beg_features = beg_df.values
+    adv_features = adv_df.values
+    beg_holdout_features = beg_holdout_df.values
+    adv_holdout_features = adv_holdout_df.values
+    
+    # Combine only training data for PCA computation
+    all_train_features = np.vstack([beg_features, adv_features])
+    
+    # Standardize training data
+    standardized_train, mean, std_dev = standardize_data(all_train_features)
+    
+    # Compute PCA components from training data only
+    covariance_matrix = compute_covariance_matrix(standardized_train)
+    eigenvalues, eigenvectors = compute_eigenvalues_and_vectors(covariance_matrix)
+    sorted_eigenvalues, sorted_eigenvectors = sort_eigenvalues_and_vectors(eigenvalues, eigenvectors)
+    
+    # Standardize holdout data using means and std_devs from training data
+    standardized_beg_holdout, _, _ = standardize_data(beg_holdout_features, mean, std_dev)
+    standardized_adv_holdout, _, _ = standardize_data(adv_holdout_features, mean, std_dev)
+    
+    # Project holdout data onto principal components
+    beginner_holdout_pca = project_data(standardized_beg_holdout, sorted_eigenvectors, num_components)
+    advanced_holdout_pca = project_data(standardized_adv_holdout, sorted_eigenvectors, num_components)
+    
+    # Save PCA outputs to CSVs
+    pd.DataFrame(beginner_holdout_pca).to_csv(f'{num_components}comp_beginner_holdout_pca_output.csv', index=False)
+    pd.DataFrame(advanced_holdout_pca).to_csv(f'{num_components}comp_advanced_holdout_pca_output.csv', index=False)
+    
+    print("Beginner Holdout PCA Shape:", beginner_holdout_pca.shape)
+    print("Advanced Holdout PCA Shape:", advanced_holdout_pca.shape)
+    print("Top Eigenvalues:", sorted_eigenvalues[:num_components])
+    print("Variance Explained:", sum(sorted_eigenvalues[:num_components]) / sum(sorted_eigenvalues) * 100, "%")

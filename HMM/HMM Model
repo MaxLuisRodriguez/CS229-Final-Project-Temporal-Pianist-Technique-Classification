@@ -1,0 +1,304 @@
+import pandas as pd
+import numpy as np
+from hmmlearn import hmm
+import joblib
+import os
+from sklearn.preprocessing import StandardScaler, RobustScaler
+from sklearn.model_selection import KFold
+from sklearn.metrics import mean_squared_error
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+
+class EnhancedHMM:
+    def __init__(self, n_components=6, sequence_length=20, covariance_type='full', 
+                 min_covar=1e-4, n_iter=1000, num_features = 21):
+        # number of hidden states
+        self.n_components = n_components
+        # default 20 images in a sequence. Will change to 19 with optical flow
+        self.sequence_length = sequence_length
+        # finds covariance between x,y,z coordinate features
+        self.covariance_type = covariance_type
+        self.min_covar = min_covar
+        self.n_iter = n_iter
+        self.models = {}
+        self.scalers = {}
+        self.num_features = num_features
+        
+    def _init_hmm(self):
+        """Initialize HMM with optimal parameters"""
+        return hmm.GaussianHMM(
+            n_components=self.n_components,
+            covariance_type=self.covariance_type,
+            n_iter=self.n_iter,
+            random_state=42,
+            min_covar=self.min_covar,
+            init_params="kmeans"  # Initialize using k-means clustering
+        )
+    
+    def preprocess_data(self, df, is_training=True):
+        """Preprocess data with improved scaling and outlier handling"""
+        num_images = df.shape[0]
+        num_sequences = num_images // self.sequence_length
+        # N x D Matrix with N images per sequence and D features
+        landmark_sequences = {i: [] for i in range(21)}
+        
+        # Extract sequences for each landmark
+        for seq in range(num_sequences):
+            start_idx = seq * self.sequence_length
+            end_idx = start_idx + self.sequence_length
+            for i in range(self.num_features):
+                seq_data = [self._parse_landmark(df, row, i) 
+                           for row in range(start_idx, end_idx)]
+                landmark_sequences[i].append(np.array(seq_data))
+        
+        # Apply robust scaling
+        if is_training:
+            # store median Q2 of each feature and interquartile range Q3 - Q1
+            self.scalers = {i: RobustScaler() for i in range(21)}
+        
+        scaled_sequences = {}
+        for i in range(self.num_features):
+            if is_training:
+                X = np.concatenate(landmark_sequences[i], axis=0)
+                X_scaled = self.scalers[i].fit_transform(X)
+                lengths = [self.sequence_length] * len(landmark_sequences[i])
+                scaled_sequences[i] = (X_scaled, lengths)
+            # Use previous scalar calculations to scale test data
+            else:
+                scaled_sequences[i] = [
+                    self.scalers[i].transform(seq) 
+                    for seq in landmark_sequences[i]
+                ]
+        
+        return scaled_sequences
+    
+    def _parse_landmark(self, df, row, i):
+        """Extract landmark coordinates with validation"""
+        coords = [
+            df.iloc[row][f'lm_{i}_x'],
+            df.iloc[row][f'lm_{i}_y'],
+            df.iloc[row][f'lm_{i}_z']
+        ]
+        # Handle potential NaN values
+        return np.nan_to_num(coords, nan=0.0)
+    
+    def train(self, train_df, validation_split=0.2, save_dir=None):
+        """Train HMM models with cross-validation and optional saving"""
+        # first step is to apply robust scaling
+        scaled_sequences = self.preprocess_data(train_df, is_training=True)
+        
+        for i in range(self.num_features):
+            X_scaled, lengths = scaled_sequences[i]
+            
+            # Implement k-fold cross-validation
+            kf = KFold(n_splits=5, shuffle=True, random_state=42)
+            best_score = float('-inf')
+            best_model = None
+            
+            # train 5 separate HMMs per feature for each fold
+            for train_idx, val_idx in kf.split(X_scaled):
+                model = self._init_hmm()
+                
+                # Split sequences properly. data indices must be exactly divisible by seq length
+                # discard extra frames beyond sequence length
+                train_len = (len(train_idx) // self.sequence_length) * self.sequence_length
+                val_len = (len(val_idx) // self.sequence_length) * self.sequence_length
+                
+                X_train = X_scaled[train_idx[:train_len]]
+                X_val = X_scaled[val_idx[:val_len]]
+                
+                # Train model
+                model.fit(X_train, [self.sequence_length] * (train_len // self.sequence_length))
+                score = model.score(X_val)
+                
+                if score > best_score:
+                    best_score = score
+                    best_model = model
+            
+            self.models[i] = best_model
+        
+        # Save individual model if directory is specified
+        if save_dir:
+            model_path = os.path.join(save_dir, f"hmm_landmark_{i}.pkl")
+            joblib.dump(best_model, model_path)
+            # Also save the scaler
+            scaler_path = os.path.join(save_dir, f"scaler_landmark_{i}.pkl")
+            joblib.dump(self.scalers[i], scaler_path)
+            print(f"Saved model and scaler for landmark {i} to {save_dir}")
+    
+    def predict_proba(self, test_df):
+        """Compute normalized probabilities with improved handling"""
+        scaled_sequences = self.preprocess_data(test_df, is_training=False)
+        num_sequences = len(scaled_sequences[0])
+        probabilities = []
+        
+        for seq_idx in range(num_sequences):
+            seq_log_probs = []
+            
+            for i in range(self.num_features):
+                try:
+                    # calculates log likelihood of sequence features
+                    log_prob = self.models[i].score(scaled_sequences[i][seq_idx])
+                    seq_log_probs.append(log_prob)
+                # throw error if sequence prob cant be appended
+                except Exception as e:
+                    print(f"Error processing landmark {i}, sequence {seq_idx}: {str(e)}")
+                    seq_log_probs.append(float('-inf'))
+            
+            # Improved normalization using log-sum-exp trick
+            # normalize log probabilties of feature sequences by subtracting largest probability
+            max_log_prob = max(seq_log_probs)
+            normalized_probs = [
+                np.exp(lp - max_log_prob) 
+                for lp in seq_log_probs
+            ]
+            sum_probs = sum(normalized_probs)
+            normalized_probs = [p/sum_probs for p in normalized_probs]
+            
+            probabilities.append(normalized_probs)
+        
+        return pd.DataFrame(
+            probabilities, 
+            columns=[f'lm_{i}_prob' for i in range(self.num_features)]
+        )
+    
+    def save_model(self, model_dir=r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\LOAD HMM"):
+        """Save HMM models and scalers to the specified directory"""
+        # Create directory if it doesn't exist
+        os.makedirs(model_dir, exist_ok=True)
+        
+        # Save HMM models
+        for i in range(self.num_features):
+            joblib.dump(self.models[i], os.path.join(model_dir, f"hmm_landmark_{i}.pkl"))
+        
+        # Save scalers
+        for i in range(self.num_features):
+            joblib.dump(self.scalers[i], os.path.join(model_dir, f"scaler_landmark_{i}.pkl"))
+            
+        # Save model parameters
+        model_params = {
+            'n_components': self.n_components,
+            'sequence_length': self.sequence_length,
+            'covariance_type': self.covariance_type,
+            'min_covar': self.min_covar,
+            'n_iter': self.n_iter,
+            'num_features': self.num_features
+        }
+        joblib.dump(model_params, os.path.join(model_dir, "model_params.pkl"))
+        
+        print(f"Model parameters saved to {model_dir}")
+
+    def load_model(self, model_dir=r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\LOAD HMM"):
+        """Load HMM models and scalers from the specified directory"""
+        # Initialize models dictionary
+        self.models = {}
+        
+        # Load each HMM model
+        for i in range(self.num_features):
+            model_path = os.path.join(model_dir, f"hmm_landmark_{i}.pkl")
+            if os.path.exists(model_path):
+                self.models[i] = joblib.load(model_path)
+                print(f"Loaded model for landmark {i}")
+            else:
+                print(f"Warning: Model file for landmark {i} not found at {model_path}")
+        
+        # Check if scalers exist in the same directory
+        try:
+            # Try to load scalers if they exist
+            self.scalers = {}
+            for i in range(self.num_features):
+                scaler_path = os.path.join(model_dir, f"scaler_landmark_{i}.pkl")
+                if os.path.exists(scaler_path):
+                    self.scalers[i] = joblib.load(scaler_path)
+                else:
+                    print(f"Warning: Scaler for landmark {i} not found, may need to refit scalers")
+        except Exception as e:
+            print(f"Warning: Could not load scalers: {str(e)}")
+        
+        # Try to load model parameters if available
+        try:
+            params_path = os.path.join(model_dir, "model_params.pkl")
+            if os.path.exists(params_path):
+                model_params = joblib.load(params_path)
+                self.n_components = model_params.get('n_components', self.n_components)
+                self.sequence_length = model_params.get('sequence_length', self.sequence_length)
+                self.covariance_type = model_params.get('covariance_type', self.covariance_type)
+                self.min_covar = model_params.get('min_covar', self.min_covar)
+                self.n_iter = model_params.get('n_iter', self.n_iter)
+                self.num_features = model_params.get('num_features', self.num_features)
+                print("Loaded model parameters")
+        except Exception as e:
+            print(f"Warning: Could not load model parameters: {str(e)}")
+        
+        print(f"Successfully loaded models from {model_dir}")
+        return True
+
+# Usage example - updated main section
+if __name__ == "__main__":
+    # Path configuration
+    train_csv = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\HMM train data\adv_hmm_train.csv"
+    test_csv = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\HMM train data\adv_hmm_test.csv"
+    holdout_csv = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout\Sequence Data\beg_holdout_seq_data.csv"
+    model_save_dir = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\LOAD HMM\6comp"
+    model_load_dir = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\LOAD HMM\6comp"
+    output_dir = r"C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\HMM\Results"
+    
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Flags to control execution
+    train_test = False  # Set to True to run training and testing
+    hold_out = True    # Set to True to run on holdout data
+    
+    # Initialize model
+    hmm_processor = EnhancedHMM(
+        # alternate between 2, 4, and 6 hidden states
+        n_components=6,
+        sequence_length=20,
+        covariance_type='full',
+        min_covar=1e-4,
+        n_iter=1000
+    )
+    
+    if train_test:
+        print("Running training and testing...")
+        # Load and process training data
+        train_df = pd.read_csv(train_csv)
+        test_df = pd.read_csv(test_csv)
+        
+        # Train models and save directly during training
+        hmm_processor.train(train_df, save_dir=model_save_dir)
+        
+        # Also save as a complete package (includes model parameters)
+        hmm_processor.save_model(model_save_dir)
+        
+        # Print out means for each landmark for hidden state interpretation
+        print("Hidden State Means for Each Landmark:")
+        for i in range(21):  # Assuming 21 landmarks
+            model = hmm_processor.models[i]
+            means = model.means_  # Access the means
+            print(f"Landmark {i} Hidden State Means:")
+            for state_idx, mean in enumerate(means):
+                print(f"State {state_idx}: {mean}")
+        
+        # Generate predictions on test data
+        probabilities = hmm_processor.predict_proba(test_df)
+        probs_output_path = os.path.join(output_dir, "6comp_adv_prob_data.csv")
+        probabilities.to_csv(probs_output_path, index=False)
+        print(f"Test predictions saved to {probs_output_path}")
+        
+    if hold_out:
+        print("Running on holdout data...")
+        # Load model if not already trained
+        if not train_test:
+            hmm_processor.load_model(model_load_dir)
+        
+        # Load holdout data
+        holdout_df = pd.read_csv(holdout_csv)
+        
+        # Generate predictions on holdout data
+        holdout_probs = hmm_processor.predict_proba(holdout_df)
+        holdout_output_path = os.path.join(output_dir, "6comp_holdout_beg_prob_data.csv")
+        holdout_probs.to_csv(holdout_output_path, index=False)
+        print(f"Holdout predictions saved to {holdout_output_path}")  
