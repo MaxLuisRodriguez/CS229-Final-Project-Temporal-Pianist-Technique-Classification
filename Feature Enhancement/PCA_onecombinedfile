@@ -61,10 +61,8 @@ def perform_pca(file_path, num_components, label_column=True, holdout=False, hol
         labels_train = df_train.iloc[:, -1].values  # Extract labels (last column)
         df_train = df_train.iloc[:, :-1]  # Remove label column from features
 
-    # Convert DataFrame to NumPy array
     data_train = df_train.values
 
-    # Standardize training data
     standardized_train, mean_train, std_dev_train = standardize_data(data_train)
 
     # Compute PCA on training data
@@ -75,13 +73,12 @@ def perform_pca(file_path, num_components, label_column=True, holdout=False, hol
     # Project training data onto principal components
     projected_train_data = project_data(standardized_train, sorted_eigenvectors, num_components)
 
-    # Process holdout data if applicable
     projected_holdout_data = None
     labels_holdout = None
     if holdout and holdout_file_path:
         df_holdout = load_data(holdout_file_path)
 
-        # Extract holdout labels if applicable
+        # extract holdout data
         if label_column:
             labels_holdout = df_holdout.iloc[:, -1].values
             df_holdout = df_holdout.iloc[:, :-1]
@@ -89,7 +86,7 @@ def perform_pca(file_path, num_components, label_column=True, holdout=False, hol
         # Convert holdout DataFrame to NumPy array
         data_holdout = df_holdout.values
 
-        # Standardize holdout data using training mean and std_dev
+        # standardize holdout data
         standardized_holdout, _, _ = standardize_data(data_holdout, mean_train, std_dev_train)
 
         # Project holdout data onto !!!training!!! principal components
@@ -98,14 +95,13 @@ def perform_pca(file_path, num_components, label_column=True, holdout=False, hol
     return projected_train_data, sorted_eigenvalues, labels_train, projected_holdout_data, labels_holdout
 
 if __name__ == '__main__':
-    # File paths
+ 
     train_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Probabilities TrainTest\6comp probs\6comp_MLP_traintest_combined.csv'
     holdout_file_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\New Data\Holdout\6 State Probs\6comp_holdout_MLP_traintest_combined.csv'  # Change as needed
     num_components = 10  # Adjust as needed
     label_column = True  # Set to False if no label column
     holdout = True  # Set to True if applying PCA to holdout data
 
-    # Perform PCA
     projected_train, eigenvalues, labels_train, projected_holdout, labels_holdout = perform_pca(
         train_file_path, num_components, label_column, holdout, holdout_file_path
     )
@@ -119,7 +115,7 @@ if __name__ == '__main__':
     train_output_path = r'C:\Users\maxlr\OneDrive\Desktop\CS229\229 Project Scripts\PCA_6comp_train_data.csv'
     train_df.to_csv(train_output_path, index=False)
 
-    # Save transformed holdout data if applicable
+    # Save transformed holdout data
     if holdout:
         holdout_df = pd.DataFrame(projected_holdout, columns=col_names)
         if label_column:
