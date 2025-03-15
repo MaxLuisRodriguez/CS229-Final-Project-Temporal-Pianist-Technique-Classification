@@ -1,0 +1,69 @@
+e==1.32.0
+azure-storage-blob==12.24.1
+Brotli @ file:///C:/b/abs_c415aux9ra/croot/brotli-split_1736182803933/work
+certifi @ file:///C:/b/abs_8a944p1_gn/croot/certifi_1738623753421/work/certifi
+cffi==1.17.1
+charset-normalizer @ file:///croot/charset-normalizer_1721748349566/work
+contourpy @ file:///C:/b/abs_b0lpi9pj9c/croot/contourpy_1738161183484/work
+cryptography==44.0.2
+cvxopt==1.3.2
+cycler @ file:///tmp/build/80754af9/cycler_1637851556182/work
+filelock==3.17.0
+flatbuffers==25.2.10
+fonttools @ file:///C:/b/abs_4crkswws2h/croot/fonttools_1737040078745/work
+fsspec==2025.3.0
+hmmlearn==0.3.3
+idna @ file:///C:/b/abs_aad84bnnw5/croot/idna_1714398896795/work
+importlib_metadata==8.6.1
+importlib_resources @ file:///C:/b/abs_e9f8_0_2dq/croot/importlib_resources-suite_1720641112288/work
+isodate==0.7.2
+jax==0.4.30
+jaxlib==0.4.30
+Jinja2==3.1.6
+joblib==1.4.2
+kiwisolver @ file:///C:/b/abs_88mdhvtahm/croot/kiwisolver_1672387921783/work
+MarkupSafe==3.0.2
+matplotlib==3.9.2
+mediapipe==0.10.21
+mkl-fft==1.3.1
+mkl-random @ file:///C:/ci/mkl_random_1626186184308/work
+mkl-service==2.4.0
+ml_dtypes==0.5.1
+mpmath==1.3.0
+networkx==3.2.1
+numpy @ file:///C:/b/abs_53f_dbvhzc/croot/numpy_and_numpy_base_1665773185489/work
+opencv-contrib-python==4.11.0.86
+opencv-python==4.11.0.86
+opt_einsum==3.4.0
+packaging @ file:///C:/b/abs_3by6s2fa66/croot/packaging_1734472138782/work
+pandas==2.2.3
+pillow @ file:///C:/b/abs_b50vowcrzo/croot/pillow_1738010273782/work
+platformdirs @ file:///C:/b/abs_b6z_yqw_ii/croot/platformdirs_1692205479426/work
+ply==3.11
+pooch @ file:///C:/b/abs_7acoiuwpey/croot/pooch_1731007069545/work
+protobuf==4.25.6
+pycparser==2.22
+pyparsing @ file:///C:/b/abs_40z8gyj9wi/croot/pyparsing_1731445739241/work
+PyQt5==5.15.10
+PyQt5_sip @ file:///C:/b/abs_d1i1jr9fgt/croot/pyqt-split_1736540551157/work/pyqt_sip
+PySocks @ file:///C:/ci/pysocks_1605307512533/work
+python-dateutil @ file:///C:/b/abs_3au_koqnbs/croot/python-dateutil_1716495777160/work
+pytz==2025.1
+requests @ file:///C:/b/abs_c3508vg8ez/croot/requests_1731000584867/work
+scikit-learn==1.6.1
+scipy==1.10.1
+sentencepiece==0.2.0
+sip @ file:///C:/b/abs_b6twfwtueg/croot/sip_1736544693649/work
+six @ file:///tmp/build/80754af9/six_1644875935023/work
+sounddevice==0.5.1
+sympy==1.13.1
+threadpoolctl==3.5.0
+tomli @ file:///C:/Windows/TEMP/abs_ac109f85-a7b3-4b4d-bcfd-52622eceddf0hy332ojo/croots/recipe/tomli_1657175513137/work      
+torch==2.6.0
+tornado @ file:///C:/b/abs_7cyu943ybx/croot/tornado_1733960510898/work
+typing_extensions==4.12.2
+tzdata==2025.1
+unicodedata2 @ file:///C:/b/abs_dfnftvxi4k/croot/unicodedata2_1736543771112/work
+urllib3 @ file:///C:/b/abs_7bst06lizn/croot/urllib3_1737133657081/work
+win-inet-pton @ file:///C:/ci/win_inet_pton_1605306162074/work
+zipp @ file:///C:/b/abs_2fcpcg89my/croot/zipp_1732630746332/work
