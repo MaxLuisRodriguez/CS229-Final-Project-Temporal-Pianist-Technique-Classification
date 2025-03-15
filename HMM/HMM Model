@@ -118,7 +118,7 @@ class EnhancedHMM:
             
             self.models[i] = best_model
         
-        # Save individual model if directory is specified
+        # Save individual model
         if save_dir:
             model_path = os.path.join(save_dir, f"hmm_landmark_{i}.pkl")
             joblib.dump(best_model, model_path)
@@ -203,33 +203,28 @@ class EnhancedHMM:
             else:
                 print(f"Warning: Model file for landmark {i} not found at {model_path}")
         
-        # Check if scalers exist in the same directory
-        try:
-            # Try to load scalers if they exist
-            self.scalers = {}
-            for i in range(self.num_features):
-                scaler_path = os.path.join(model_dir, f"scaler_landmark_{i}.pkl")
-                if os.path.exists(scaler_path):
-                    self.scalers[i] = joblib.load(scaler_path)
-                else:
-                    print(f"Warning: Scaler for landmark {i} not found, may need to refit scalers")
-        except Exception as e:
-            print(f"Warning: Could not load scalers: {str(e)}")
         
-        # Try to load model parameters if available
-        try:
-            params_path = os.path.join(model_dir, "model_params.pkl")
-            if os.path.exists(params_path):
-                model_params = joblib.load(params_path)
-                self.n_components = model_params.get('n_components', self.n_components)
-                self.sequence_length = model_params.get('sequence_length', self.sequence_length)
-                self.covariance_type = model_params.get('covariance_type', self.covariance_type)
-                self.min_covar = model_params.get('min_covar', self.min_covar)
-                self.n_iter = model_params.get('n_iter', self.n_iter)
-                self.num_features = model_params.get('num_features', self.num_features)
-                print("Loaded model parameters")
-        except Exception as e:
-            print(f"Warning: Could not load model parameters: {str(e)}")
+        # load scalers 
+        self.scalers = {}
+        for i in range(self.num_features):
+            scaler_path = os.path.join(model_dir, f"scaler_landmark_{i}.pkl")
+            if os.path.exists(scaler_path):
+                self.scalers[i] = joblib.load(scaler_path)
+            else:
+                print(f"Warning: Scaler for landmark {i} not found, may need to refit scalers")
+        
+      
+        params_path = os.path.join(model_dir, "model_params.pkl")
+        if os.path.exists(params_path):
+            model_params = joblib.load(params_path)
+            self.n_components = model_params.get('n_components', self.n_components)
+            self.sequence_length = model_params.get('sequence_length', self.sequence_length)
+            self.covariance_type = model_params.get('covariance_type', self.covariance_type)
+            self.min_covar = model_params.get('min_covar', self.min_covar)
+            self.n_iter = model_params.get('n_iter', self.n_iter)
+            self.num_features = model_params.get('num_features', self.num_features)
+            print("Loaded model parameters")
+        
         
         print(f"Successfully loaded models from {model_dir}")
         return True
