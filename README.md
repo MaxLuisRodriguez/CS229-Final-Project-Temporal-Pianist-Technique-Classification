@@ -151,7 +151,7 @@ The project evaluates classification performance using:
 
 ## Contributing
 
-This is a CS229 final project. For questions or contributions, please contact the project authors.
+This is a CS229 final project. For questions or contributions, please contact the project author.
 
 ## License
 
